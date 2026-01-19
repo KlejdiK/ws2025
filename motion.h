@@ -15,21 +15,27 @@
 
 #ifndef MOTION_H
 #define MOTION_H
+
 #include <stdint.h>
 #include <stdbool.h>
 
 #define MOTION_DEADZONE_CM  5
-#define MOTION_MIN_DUTY     0.15f
-#define MOTION_MAX_DUTY     0.40f
-#define MOTION_KP           0.015f
 
-typedef enum{
+/* PID Parameter */
+#define MOTION_KP  0.02f
+#define MOTION_KI  0.001f
+#define MOTION_KD  0.05f
+
+#define MOTION_MIN_DUTY 0.10f
+#define MOTION_MAX_DUTY 0.50f
+
+typedef enum {
     MOTION_DIR_STOP,
     MOTION_DIR_FORWARD,
     MOTION_DIR_BACKWARD
 } motion_direction_t;
 
-typedef struct{
+typedef struct {
     float duty;
     motion_direction_t direction;
     int32_t error_cm;
@@ -40,7 +46,5 @@ extern motion_control_t motion_control;
 
 void motion_init(void);
 void motion_loop(void);
-float motion_calculate_duty(int32_t error_cm);
-motion_direction_t motion_calculate_direction(int32_t error_cm);
- 
+
 #endif
