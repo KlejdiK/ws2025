@@ -15,7 +15,6 @@
 
 #include <motion.h>
 #include <state.h>
-#include <constants.h>
 
 motion_control_t motion_control = {
     .duty = 0.0f,
@@ -32,27 +31,28 @@ void motion_init(void)
     motion_control.active = false;
 }
 
-/* -------- Duty-Berechnung mit Abbremsen -------- */
+/* -------- Duty-Berechnung mit echtem Abbremsen -------- */
 float motion_calculate_duty(int32_t error_cm)
 {
     float abs_error = (error_cm > 0) ? (float)error_cm : (float)(-error_cm);
+
+    /* proportional */
     float duty = MOTION_KP * abs_error;
 
-    /* obere Begrenzung */
+    /* Begrenzen */
     if (duty > MOTION_MAX_DUTY)
         duty = MOTION_MAX_DUTY;
 
-    /* weit weg → Mindestleistung erzwingen */
-    if (abs_error > 2 * MOTION_DEADZONE_CM)
-    {
-        if (duty < MOTION_MIN_DUTY)
-            duty = MOTION_MIN_DUTY;
-    }
-    /* nahe Ziel → echtes Abbremsen */
-    else
+    /* Nahe Ziel: wirklich langsamer werden */
+    if (abs_error <= 2 * MOTION_DEADZONE_CM)
     {
         if (duty < 0.05f)
             duty = 0.0f;
+    }
+    else
+    {
+        if (duty < MOTION_MIN_DUTY)
+            duty = MOTION_MIN_DUTY;
     }
 
     return duty;
@@ -72,8 +72,6 @@ motion_direction_t motion_calculate_direction(int32_t error_cm)
 /* -------- Haupt-Regelschleife -------- */
 void motion_loop(void)
 {
-    static uint32_t stable_counter = 0;
-
     if (!value.sonic.new)
         return;
 
@@ -88,32 +86,22 @@ void motion_loop(void)
         return;
     }
 
+    /* goal ist DIREKT in cm */
     uint32_t dist_cm = value.sonic.distance;
-    uint32_t goal_cm = (state.goal + 1) * 10;
-    int32_t error_cm = (int32_t)dist_cm - (int32_t)goal_cm;
+    uint32_t goal_cm = state.goal;
 
+    int32_t error_cm = (int32_t)dist_cm - (int32_t)goal_cm;
     motion_control.error_cm = error_cm;
+
     motion_control.direction = motion_calculate_direction(error_cm);
 
-    /* -------- Ziel erreicht -------- */
     if (motion_control.direction == MOTION_DIR_STOP)
     {
-        motion_control.duty = 0.0f;
         motion_control.active = false;
+        motion_control.duty = 0.0f;
         value.motion = 0.0f;
-
-        /* goal automatisch erhöhen */
-        stable_counter++;
-        if (stable_counter > 20)
-        {
-            state.goal++;
-            stable_counter = 0;
-        }
         return;
     }
-
-    /* -------- Bewegung -------- */
-    stable_counter = 0;
 
     motion_control.duty = motion_calculate_duty(error_cm);
     motion_control.active = true;
@@ -123,3 +111,4 @@ void motion_loop(void)
                    ? duty_percent
                    : -duty_percent;
 }
+
