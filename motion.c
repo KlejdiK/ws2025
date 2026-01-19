@@ -16,12 +16,11 @@
 #include <motion.h>
 #include <state.h>
 
-motion_control_t motion_control = {
-    .duty = 0.0f,
-    .direction = MOTION_DIR_STOP,
-    .error_cm = 0,
-    .active = false
-};
+motion_control_t motion_control;
+
+/* PID interne Zustände */
+static float integral = 0.0f;
+static int32_t last_error = 0;
 
 void motion_init(void)
 {
@@ -29,47 +28,11 @@ void motion_init(void)
     motion_control.direction = MOTION_DIR_STOP;
     motion_control.error_cm = 0;
     motion_control.active = false;
+
+    integral = 0.0f;
+    last_error = 0;
 }
 
-/* -------- Duty-Berechnung mit echtem Abbremsen -------- */
-float motion_calculate_duty(int32_t error_cm)
-{
-    float abs_error = (error_cm > 0) ? (float)error_cm : (float)(-error_cm);
-
-    /* proportional */
-    float duty = MOTION_KP * abs_error;
-
-    /* Begrenzen */
-    if (duty > MOTION_MAX_DUTY)
-        duty = MOTION_MAX_DUTY;
-
-    /* Nahe Ziel: wirklich langsamer werden */
-    if (abs_error <= 2 * MOTION_DEADZONE_CM)
-    {
-        if (duty < 0.05f)
-            duty = 0.0f;
-    }
-    else
-    {
-        if (duty < MOTION_MIN_DUTY)
-            duty = MOTION_MIN_DUTY;
-    }
-
-    return duty;
-}
-
-/* -------- Richtungsentscheidung -------- */
-motion_direction_t motion_calculate_direction(int32_t error_cm)
-{
-    if (error_cm >= -MOTION_DEADZONE_CM &&
-        error_cm <=  MOTION_DEADZONE_CM)
-        return MOTION_DIR_STOP;
-
-    return (error_cm > 0) ? MOTION_DIR_FORWARD
-                          : MOTION_DIR_BACKWARD;
-}
-
-/* -------- Haupt-Regelschleife -------- */
 void motion_loop(void)
 {
     if (!value.sonic.new)
@@ -83,32 +46,56 @@ void motion_loop(void)
         motion_control.duty = 0.0f;
         motion_control.direction = MOTION_DIR_STOP;
         value.motion = 0.0f;
+        integral = 0.0f;
         return;
     }
 
-    /* goal ist DIREKT in cm */
-    uint32_t dist_cm = value.sonic.distance;
-    uint32_t goal_cm = state.goal;
+    /* Ziel: goal * 10 cm */
+    int32_t dist_cm = (int32_t)value.sonic.distance;
+    int32_t goal_cm = (int32_t)(state.goal * 10);
+    int32_t error = dist_cm - goal_cm;
 
-    int32_t error_cm = (int32_t)dist_cm - (int32_t)goal_cm;
-    motion_control.error_cm = error_cm;
+    motion_control.error_cm = error;
 
-    motion_control.direction = motion_calculate_direction(error_cm);
-
-    if (motion_control.direction == MOTION_DIR_STOP)
+    /* Deadzone */
+    if (error >= -MOTION_DEADZONE_CM &&
+        error <=  MOTION_DEADZONE_CM)
     {
-        motion_control.active = false;
+        motion_control.direction = MOTION_DIR_STOP;
         motion_control.duty = 0.0f;
+        motion_control.active = false;
         value.motion = 0.0f;
+        integral = 0.0f;
+        last_error = error;
         return;
     }
 
-    motion_control.duty = motion_calculate_duty(error_cm);
+    /* Richtung */
+    motion_control.direction =
+        (error > 0) ? MOTION_DIR_FORWARD : MOTION_DIR_BACKWARD;
+
+    /* ---------- PID ---------- */
+    float p = MOTION_KP * error;
+
+    integral += error;
+    float i = MOTION_KI * integral;
+
+    float d = MOTION_KD * (error - last_error);
+    last_error = error;
+
+    float output = p + i + d;
+
+    /* Absolutwert → Duty */
+    if (output < 0) output = -output;
+
+    if (output > MOTION_MAX_DUTY) output = MOTION_MAX_DUTY;
+    if (output < MOTION_MIN_DUTY) output = MOTION_MIN_DUTY;
+
+    motion_control.duty = output;
     motion_control.active = true;
 
-    float duty_percent = motion_control.duty * 100.0f;
-    value.motion = (motion_control.direction == MOTION_DIR_FORWARD)
-                   ? duty_percent
-                   : -duty_percent;
+    value.motion =
+        (motion_control.direction == MOTION_DIR_FORWARD)
+        ? output * 100.0f
+        : -output * 100.0f;
 }
-
