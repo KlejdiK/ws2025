@@ -1,0 +1,22 @@
+/*
+ * Copyright (c) 2025 Hochschule Darmstadt
+ *
+ * This software is provided exclusively for the practical part of the
+ * course 'Embedded Systems' at 'Darmstadt University of Applied Sciences
+ * (Hochschule Darmstadt, h_da)'.
+ *
+ * Any use, distribution, or modification outside this context is prohibited
+ * without explicit permission.
+ *
+ * AUTHORS: David Heiß, Manfred Pester, Jens-Peter Akelbein
+ * FILE: clock.h
+ * CONTENTS: Declarations of local clock module
+ */
+
+#pragma once
+
+// initialization steps for the local clock
+void clock_init(void);
+
+// loop for regular tasks related to local clock
+void clock_loop(void);
