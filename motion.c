@@ -35,67 +35,62 @@ void motion_init(void)
 
 void motion_loop(void)
 {
-    if (!value.sonic.new)
-        return;
-
-    value.sonic.new = false;
-
-    if (state.motion != MOTION_STATE_ON)
-    {
-        motion_control.active = false;
-        motion_control.duty = 0.0f;
-        motion_control.direction = MOTION_DIR_STOP;
-        value.motion = 0.0f;
-        integral = 0.0f;
-        return;
-    }
-
-    /* Ziel: goal * 10 cm */
-    int32_t dist_cm = (int32_t)value.sonic.distance;
-    int32_t goal_cm = (int32_t)(state.goal * 10);
-    int32_t error = dist_cm - goal_cm;
-
+    int32_t dist_cm = (int32_t)value.sonic.distance; 
+    int32_t goal_cm = (int32_t)((state.goal+1) * 10); 
+    int32_t error = dist_cm - goal_cm; 
     motion_control.error_cm = error;
 
-    /* Deadzone */
-    if (error >= -MOTION_DEADZONE_CM &&
-        error <=  MOTION_DEADZONE_CM)
-    {
-        motion_control.direction = MOTION_DIR_STOP;
-        motion_control.duty = 0.0f;
-        motion_control.active = false;
-        value.motion = 0.0f;
-        integral = 0.0f;
-        last_error = error;
-        return;
-    }
 
-    /* Richtung */
-    motion_control.direction =
-        (error > 0) ? MOTION_DIR_FORWARD : MOTION_DIR_BACKWARD;
+    int32_t abs_error = (error >= 0) ? error : -error;
 
-    /* ---------- PID ---------- */
-    float p = MOTION_KP * error;
+/* Deadzone */
+if (abs_error <= MOTION_DEADZONE_CM)
+{
+    motion_control.direction = MOTION_DIR_STOP;
+    motion_control.duty = 0.0f;
+    motion_control.active = false;
+    value.motion = 0.0f;
+    integral = 0.0f;
+    last_error = 0;
+    return;
+}
 
-    integral += error;
-    float i = MOTION_KI * integral;
+/* Richtung */
+motion_control.direction =
+    (error > 0) ? MOTION_DIR_FORWARD : MOTION_DIR_BACKWARD;
 
-    float d = MOTION_KD * (error - last_error);
-    last_error = error;
+/* PID nur nahe Ziel */
+int32_t pid_error = error;
+if (pid_error >  40) pid_error =  40;
+if (pid_error < -40) pid_error = -40;
 
-    float output = p + i + d;
+/* Richtungswechsel → Integral reset */
+if ((pid_error > 0 && last_error < 0) ||
+    (pid_error < 0 && last_error > 0))
+{
+    integral = 0.0f;
+}
 
-    /* Absolutwert → Duty */
-    if (output < 0) output = -output;
+float p = MOTION_KP * pid_error;
 
-    if (output > MOTION_MAX_DUTY) output = MOTION_MAX_DUTY;
-    if (output < MOTION_MIN_DUTY) output = MOTION_MIN_DUTY;
+integral += pid_error;
+if (integral > 200) integral = 200;
+if (integral < -200) integral = -200;
+float i = MOTION_KI * integral;
 
-    motion_control.duty = output;
-    motion_control.active = true;
+float d = MOTION_KD * (pid_error - last_error);
+last_error = pid_error;
 
-    value.motion =
-        (motion_control.direction == MOTION_DIR_FORWARD)
-        ? output * 100.0f
-        : -output * 100.0f;
+float output = p + i + d;
+if (output < 0) output = -output;
+
+if (output > MOTION_MAX_DUTY) output = MOTION_MAX_DUTY;
+
+motion_control.duty = output;
+motion_control.active = true;
+
+value.motion =
+    (motion_control.direction == MOTION_DIR_FORWARD)
+    ? output * 100.0f
+    : -output * 100.0f;
 }
