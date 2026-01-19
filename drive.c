@@ -14,30 +14,21 @@
  */
 
 #include <drive.h>
-
-#include <constants.h>
-#include <state.h>
 #include <sam.h>
+#include <state.h>
 #include <motion.h>
+#include <constants.h>
 
-/*
-#define TARGET_DIST_CM 30
-#define DEADZONE_CM    3
-#define MIN_DUTY       0.2f
-#define MAX_DUTY       0.6f
-#define ERROR_SCALE     50f
-*/
-
-void drive_init()
+void drive_init(void)
 {
-    //PMC_PCER1 = (1 << 34);  // ?
     PMC_PCER1 = PMC_PCER1_PID34;
 
+    /* Richtungspins */
     PIOC_PER = (1 << 23) | (1 << 24);
     PIOC_OER = (1 << 23) | (1 << 24);
-
     PIOC_CODR = (1 << 23) | (1 << 24);
 
+    /* PWM-Pin */
     PIOC_PDR = (1 << 25);
     PIOC_ABSR |= (1 << 25);
 
@@ -50,118 +41,50 @@ void drive_init()
         TC0_CMR0_ACPC_CLEAR |
         TC0_CMR0_TCCLKS_TIMER_CLOCK1;
 
-    TC2_RC0 = 20;
+    /* hohe Auflösung */
+    TC2_RC0 = 1000;
     TC2_RA0 = 0;
 
     TC2_CCR0 = TC0_CCR0_CLKEN | TC0_CCR0_SWTRG;
-
 }
 
-void drive_loop()
+void drive_loop(void)
 {
-    if (state.motion != MOTION_STATE_ON)
+    if (state.motion != MOTION_STATE_ON ||
+        !motion_control.active)
     {
         PIOC_PER = PIOC_PER_P25;
-        PIOC_CODR = (1 << 23) | (1 << 24); // soll beode Richtungspins LOW also Stoppen
+        PIOC_CODR = (1 << 23) | (1 << 24);
         TC2_RA0 = 0;
-
-        value.motion = 0.0f;
         return;
     }
 
     PIOC_PDR = PIOC_PDR_P25;
 
-
-    switch (motion_control.direction)
+    /* Richtung setzen */
+    if (motion_control.direction == MOTION_DIR_FORWARD)
     {
-        case MOTION_DIR_FORWARD:
-            PIOC_SODR = (1 << 23);
-            PIOC_CODR = (1 << 24);
-            break;
-
-        case MOTION_DIR_BACKWARD:
-            PIOC_CODR = (1 << 23);
-            PIOC_SODR = (1 << 24);
-            break;
-            
-        case MOTION_DIR_STOP:
-        default:
-            PIOC_CODR = (1 << 23) | (1 << 24);
-            TC2_RA0 = 0;
-            return;
+        PIOC_SODR = (1 << 23);
+        PIOC_CODR = (1 << 24);
     }
-
-    uint32_t ra_value = (uint32_t)(TC2_RC0 * motion_control.duty);
-
-    if (ra_value > TC2_RC0)
-        ra_value = TC2_RC0;
-
-    TC2_RA0 = ra_value;    
-
-}
-
-    
-
-/*
-    int32_t dist_cm = value.sonic.distance;
-    uint32_t goal_cm = (state.goal + 1) * 10;
-
-
-    int32_t error_cm = (uint32_t)dist_cm - (uint32_t)goal_cm;
-
-
-    if (error_cm >= -DEADZONE_CM && error_cm <= DEADZONE_CM)
+    else if (motion_control.direction == MOTION_DIR_BACKWARD)
     {
-        TC2_RA0 = 0;
+        PIOC_CODR = (1 << 23);
+        PIOC_SODR = (1 << 24);
+    }
+    else
+    {
         PIOC_CODR = (1 << 23) | (1 << 24);
-        value.motion = 0.0;
+        TC2_RA0 = 0;
         return;
     }
 
-    float abs_error_cm;
-    if (error_cm > 0)
-        abs_error_cm = (float)error_cm;
-    else
-        abs_error_cm = (float)(-error_cm);    
+    uint32_t ra = (uint32_t)(TC2_RC0 * motion_control.duty);
+    if (ra > TC2_RC0)
+        ra = TC2_RC0;
 
+    TC2_RA0 = ra;
+}
 
-    float duty = KP * abs_error_cm;
-
-    // duty begrenzen
-    if (duty > MAX_DUTY) duty = MAX_DUTY;
-    if (duty < MIN_DUTY) duty = MIN_DUTY;
-
-
-    if (error_cm > 0)
-    {
-        PIOC_SODR = (1 << 23);  // vorwärts
-        PIOC_CODR = (1 << 24);
-
-        //duty = error / 50.0f;
-    }
-
-    else
-    {
-        PIOC_CODR = (1 << 23);
-        PIOC_SODR = (1 << 24);  // rückwärts
-
-        //duty = (-error) / 50.0f;
-    }
-
-    uint32_t compare_value = (uint32_t)(TC2_RC0 * duty);
-    TC2_RA0 = compare_value;
-
-    float duty_percent = duty * 100.0f;
-
-    
-
-    //TC2_RA0 = (uint32_t)(TC2_RC0 * duty);
-
-
-    if (error_cm > 0)
-        value.motion = duty_percent;
-    else
-        value.motion = -duty_percent;
-*/
 
 
