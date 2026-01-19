@@ -13,9 +13,9 @@
  * CONTENTS: implementation for all functions of motion module
  */
 
-#include <constants.h>
 #include <motion.h>
 #include <state.h>
+#include <constants.h>
 
 motion_control_t motion_control = {
     .duty = 0.0f,
@@ -24,52 +24,62 @@ motion_control_t motion_control = {
     .active = false
 };
 
-void motion_init(void){
+void motion_init(void)
+{
     motion_control.duty = 0.0f;
     motion_control.direction = MOTION_DIR_STOP;
     motion_control.error_cm = 0;
     motion_control.active = false;
 }
 
-float motion_calculate_duty(int32_t error_cm){
-    float abs_error;
-    if(error_cm > 0){
-        abs_error = (float)error_cm; 
-    } else {
-        abs_error = (float)(-error_cm);
-    }
-
+/* -------- Duty-Berechnung mit Abbremsen -------- */
+float motion_calculate_duty(int32_t error_cm)
+{
+    float abs_error = (error_cm > 0) ? (float)error_cm : (float)(-error_cm);
     float duty = MOTION_KP * abs_error;
 
-    if(duty < MOTION_MIN_DUTY){
-        duty = MOTION_MIN_DUTY;
-    }
-    if(duty > MOTION_MAX_DUTY){
+    /* obere Begrenzung */
+    if (duty > MOTION_MAX_DUTY)
         duty = MOTION_MAX_DUTY;
+
+    /* weit weg → Mindestleistung erzwingen */
+    if (abs_error > 2 * MOTION_DEADZONE_CM)
+    {
+        if (duty < MOTION_MIN_DUTY)
+            duty = MOTION_MIN_DUTY;
+    }
+    /* nahe Ziel → echtes Abbremsen */
+    else
+    {
+        if (duty < 0.05f)
+            duty = 0.0f;
     }
 
     return duty;
 }
 
+/* -------- Richtungsentscheidung -------- */
 motion_direction_t motion_calculate_direction(int32_t error_cm)
 {
-    if (error_cm >= -MOTION_DEADZONE_CM && error_cm <= MOTION_DEADZONE_CM)
+    if (error_cm >= -MOTION_DEADZONE_CM &&
+        error_cm <=  MOTION_DEADZONE_CM)
         return MOTION_DIR_STOP;
 
-    if (error_cm > 0)
-        return MOTION_DIR_FORWARD;
-        
-    return MOTION_DIR_BACKWARD;    
+    return (error_cm > 0) ? MOTION_DIR_FORWARD
+                          : MOTION_DIR_BACKWARD;
 }
 
+/* -------- Haupt-Regelschleife -------- */
 void motion_loop(void)
 {
-    if(!value.sonic.new)
+    static uint32_t stable_counter = 0;
+
+    if (!value.sonic.new)
         return;
 
     value.sonic.new = false;
-    
-    if(state.motion != MOTION_STATE_ON)
+
+    if (state.motion != MOTION_STATE_ON)
     {
         motion_control.active = false;
         motion_control.duty = 0.0f;
@@ -80,28 +90,36 @@ void motion_loop(void)
 
     uint32_t dist_cm = value.sonic.distance;
     uint32_t goal_cm = (state.goal + 1) * 10;
-    int32_t error_cm = (uint32_t)dist_cm - (uint32_t)goal_cm;
+    int32_t error_cm = (int32_t)dist_cm - (int32_t)goal_cm;
 
     motion_control.error_cm = error_cm;
-
     motion_control.direction = motion_calculate_direction(error_cm);
 
+    /* -------- Ziel erreicht -------- */
     if (motion_control.direction == MOTION_DIR_STOP)
     {
         motion_control.duty = 0.0f;
         motion_control.active = false;
         value.motion = 0.0f;
-    }
-    else
-    {
-        motion_control.duty = motion_calculate_duty(error_cm);
-        motion_control.active = true;
 
-        float duty_percent = motion_control.duty * 60.0f;
-        if (motion_control.direction == MOTION_DIR_FORWARD)
-            value.motion = duty_percent;
-        else
-            value.motion = -duty_percent;
+        /* goal automatisch erhöhen */
+        stable_counter++;
+        if (stable_counter > 20)
+        {
+            state.goal++;
+            stable_counter = 0;
+        }
+        return;
     }
 
+    /* -------- Bewegung -------- */
+    stable_counter = 0;
+
+    motion_control.duty = motion_calculate_duty(error_cm);
+    motion_control.active = true;
+
+    float duty_percent = motion_control.duty * 100.0f;
+    value.motion = (motion_control.direction == MOTION_DIR_FORWARD)
+                   ? duty_percent
+                   : -duty_percent;
 }
