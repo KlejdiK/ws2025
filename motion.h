@@ -13,38 +13,21 @@
  * CONTENTS: declaration for all functions of motion module
  */
 
-#ifndef MOTION_H
-#define MOTION_H
+#ifndef _MOTION_H_
+#define _MOTION_H_
 
+#include "constants.h"
 #include <stdint.h>
-#include <stdbool.h>
 
-#define MOTION_DEADZONE_CM  5
+// stupid value - needs to be implemented
+extern int32_t motion_current;
 
-/* PID Parameter */
-#define MOTION_KP  0.02f
-#define MOTION_KI  0.001f
-#define MOTION_KD  0.05f
-
-#define MOTION_MIN_DUTY 0.10f
-#define MOTION_MAX_DUTY 0.50f
-
-typedef enum {
-    MOTION_DIR_STOP,
-    MOTION_DIR_FORWARD,
-    MOTION_DIR_BACKWARD
-} motion_direction_t;
-
-typedef struct {
-    float duty;
-    motion_direction_t direction;
-    int32_t error_cm;
-    bool active;
-} motion_control_t;
-
-extern motion_control_t motion_control;
-
+// initialization steps for motion specific
 void motion_init(void);
+
+// loop for regular tasks related to motion functions
 void motion_loop(void);
 
-#endif
+float PD_controller(float target, float current);
+
+#endif // MOTION_H
