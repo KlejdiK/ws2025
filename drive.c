@@ -13,78 +13,81 @@
  * CONTENTS: implementation for all functions for PWM motor drive
  */
 
+#include <sam3x8e.h>
 #include <drive.h>
-#include <sam.h>
 #include <state.h>
-#include <motion.h>
-#include <constants.h>
+#include <math.h>
 
-void drive_init(void)
-{
-    PMC_PCER1 = PMC_PCER1_PID34;
+void drive_clock_init(void){
 
-    /* Richtungspins */
-    PIOC_PER = (1 << 23) | (1 << 24);
-    PIOC_OER = (1 << 23) | (1 << 24);
-    PIOC_CODR = (1 << 23) | (1 << 24);
+    // Configure the timer for waveform mode
+    TC2->TC_CHANNEL[0].TC_CMR = TC0_CMR0_WAVE |       // Enable wave mode
+                                TC0_CMR0_TCCLKS_TIMER_CLOCK1 | // Use MCK/2 as the clock source
+                                TC0_CMR0_WAVSEL_UP_RC | // Count up with automatic trigger on RC compare
+                                TC0_CMR0_ACPA_CLEAR |     // Set TIOA on RA compare match
+                                TC0_CMR0_ACPC_SET;    // Clear TIOA on RC compare match
 
-    /* PWM-Pin */
-    PIOC_PDR = (1 << 25);
-    PIOC_ABSR |= (1 << 25);
+    // Set the frequency and duty cycle
+    uint32_t rc = DUE_MCK2 / 1600 / 2; //  Hz frequency         //TODO: HIER IST FEHLER
+    uint32_t ra = (uint32_t) rc * duty_cycle; //  duty cycle
 
-    TC2_CCR0 = TC0_CCR0_CLKDIS;
+    TC2->TC_CHANNEL[0].TC_RA = ra;
+    TC2->TC_CHANNEL[0].TC_RC = rc;
 
-    TC2_CMR0 =
-        TC0_CMR0_WAVE |
-        TC0_CMR0_WAVSEL_UP_RC |
-        TC0_CMR0_ACPA_SET |
-        TC0_CMR0_ACPC_CLEAR |
-        TC0_CMR0_TCCLKS_TIMER_CLOCK1;
-
-    /* hohe Auflösung */
-    TC2_RC0 = 1000;
-    TC2_RA0 = 0;
-
-    TC2_CCR0 = TC0_CCR0_CLKEN | TC0_CCR0_SWTRG;
+    // Enable the counter and start the timer
+    TC2->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
 }
 
+// initialization steps for PWM motor drive
+void drive_init(void){
+
+    // Enable the peripheral clock for PIOC (TC6 => TC2 with Channel 0) 
+    PMC->PMC_PCER1 |= PMC_PCER1_PID33;              //https://code.fbi.h-da.de/eingebettete-systeme/arduino-due/cmsis/-/raw/main/docs/datasheet.pdf#page=633
+
+    drive_clock_init();
+
+    // Configure IN1 (PA0) and IN2 (PA1) as outputs
+    PIOC->PIO_PER = PIO_PC23 | PIO_PC24 | PIO_PC25; // Enables the PIO to control the corresponding pin
+    PIOC->PIO_OER = PIO_PC23 | PIO_PC24 | PIO_PC25; // Enables the output on the I/O line
+    PIOC->PIO_CODR = PIO_PC23 | PIO_PC24 | PIO_PC25;           // Clears the data to be driven on the I/O line
+
+    //PIOC->PIO_PDR = PIO_PC25;
+
+    // Configure PIOC25 for PWM output
+    PIOC->PIO_ABSR |= PIO_PC25; // Assigns the I/O line to the Peripheral B function 
+
+}
+
+// loop for regular tasks related to PWM motor drive
 void drive_loop(void)
 {
-    if (state.motion != MOTION_STATE_ON ||
-        !motion_control.active)
+    if (direction)
     {
-        PIOC_PER = PIOC_PER_P25;
-        PIOC_CODR = (1 << 23) | (1 << 24);
-        TC2_RA0 = 0;
-        return;
-    }
-
-    PIOC_PDR = PIOC_PDR_P25;
-
-    /* Richtung setzen */
-    if (motion_control.direction == MOTION_DIR_FORWARD)
-    {
-        PIOC_SODR = (1 << 23);
-        PIOC_CODR = (1 << 24);
-    }
-    else if (motion_control.direction == MOTION_DIR_BACKWARD)
-    {
-        PIOC_CODR = (1 << 23);
-        PIOC_SODR = (1 << 24);
+        // FORWARD
+        PIOC->PIO_CODR = PIO_PC23;
+        PIOC->PIO_SODR = PIO_PC24;
     }
     else
     {
-        PIOC_CODR = (1 << 23) | (1 << 24);
-        TC2_RA0 = 0;
-        return;
+        // BACKWARD
+        PIOC->PIO_SODR = PIO_PC23;
+        PIOC->PIO_CODR = PIO_PC24;
     }
-
-    uint32_t ra = (uint32_t)(TC2_RC0 * motion_control.duty);
-    if (ra > TC2_RC0)
-        ra = TC2_RC0;
-
-    TC2_RA0 = ra;
+    
 }
 
+void drive_duty(const uint32_t freq, const float duty) {
 
+    if(duty == duty_cycle)
+    return;
 
+    uint32_t rc = SystemCoreClock / 2 / freq;
+    uint32_t ra = (uint32_t)(rc * duty);
+
+    TC2->TC_CHANNEL[0].TC_RA = ra;
+    TC2->TC_CHANNEL[0].TC_RC = rc;
+
+    TC2->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
+
+    duty_cycle = duty;
+}
