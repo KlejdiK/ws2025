@@ -13,6 +13,21 @@
  * CONTENTS: implementation for all functions for PWM motor drive
  */
 
+ /*
+ * Copyright (c) 2025 Hochschule Darmstadt
+ *
+ * This software is provided exclusively for the practical part of the
+ * course 'Embedded Systems' at 'Darmstadt University of Applied Sciences
+ * (Hochschule Darmstadt, h_da)'.
+ *
+ * Any use, distribution, or modification outside this context is prohibited
+ * without explicit permission.
+ *
+ * AUTHORS: David Heiß, Manfred Pester, Jens-Peter Akelbein
+ * FILE: drive.h
+ * CONTENTS: implementation for all functions for PWM motor drive
+ */
+
 #include <sam3x8e.h>
 #include <drive.h>
 #include <state.h>
