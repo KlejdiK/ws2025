@@ -16,18 +16,11 @@
 #ifndef _MOTION_H_
 #define _MOTION_H_
 
-#include "constants.h"
 #include <stdint.h>
 
-// stupid value - needs to be implemented
-extern int32_t motion_current;
-
-// initialization steps for motion specific
 void motion_init(void);
-
-// loop for regular tasks related to motion functions
 void motion_loop(void);
 
-float PD_controller(float target, float current);
+float PD_controller(float target_cm, float current_cm);
 
-#endif // MOTION_H
+#endif
