@@ -15,12 +15,24 @@
 
 #ifndef MOTION_H
 #define MOTION_H
-
 #include <stdint.h>
 #include <stdbool.h>
 
-typedef struct {
-    float output;        // -1.0 .. +1.0  (PWM signed)
+#define MOTION_DEADZONE_CM  3
+#define MOTION_MIN_DUTY     0.20f
+#define MOTION_MAX_DUTY     1.0f
+#define MOTION_KP           0.015f
+#define BRAKE_ZONE_CM       10
+
+typedef enum{
+    MOTION_DIR_STOP,
+    MOTION_DIR_FORWARD,
+    MOTION_DIR_BACKWARD
+} motion_direction_t;
+
+typedef struct{
+    float duty;
+    motion_direction_t direction;
     int32_t error_cm;
     bool active;
 } motion_control_t;
@@ -29,5 +41,7 @@ extern motion_control_t motion_control;
 
 void motion_init(void);
 void motion_loop(void);
-
+float motion_calculate_duty(int32_t error_cm);
+motion_direction_t motion_calculate_direction(int32_t error_cm);
+ 
 #endif
