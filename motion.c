@@ -139,100 +139,88 @@ value.motion =
  */
 
 #include <motion.h>
-//#include <sample.h>
 #include <state.h>
-#include <sam.h>
 #include <drive.h>
 
-#define DUTY_CYCLE_FREQUENCY 100
+/* PD Parameter */
+#define PROPORTIONAL_GAIN  0.02f
+#define DERIVATIVE_GAIN    0.05f
 
-// Proportional Term Coefficient
-#define PROPORTIONAL_GAIN 0.0017 
+#define STATIC_BACKWARDS_DUTY 0.4f
+#define DEFAULT_FREQ 100
+#define BACKWARD_FREQ 140
 
-// Derivative Term Coefficient
-#define DERIVATIVE_GAIN 0.007
+/* interne Zustände */
+static float last_distance_cm = 0.0f;
+static float current_speed = 0.0f;   // cm pro loop
 
-#define DISTURBANCE_OFFSET 0.0
-
-// Last speed in loop (in mm/sec)
-static float current_speed = 0.0;
-
-#define STATIC_BACKWARDS_DUTYCYCLE 0.4
-
-int frequency = 100;
-
-// Initialization steps for motion specific
-void motion_init(void) {
-    // Any necessary initialization code for the motion module
+void motion_init(void)
+{
+    last_distance_cm = 0.0f;
+    current_speed = 0.0f;
 }
 
-// Loop for regular tasks related to motion functions
-void motion_loop(void) {
-    // Handle state changes
-    switch (state.motion) {
-        case MOTION_STATE_ON: // Enable the PWM output on the ENA pin (PIOC25)
-            PIOC_PDR = (1 << 25);
-            break;
-        case MOTION_STATE_OFF: // Disable PIO control for peripheral use
-            PIOC_PER = (1 << 25);
-            break;
-        case MOTION_STATE_INVALID:
-        default:
-            break;
+void motion_loop(void)
+{
+    if (!value.sonic.new)
+        return;
+
+    value.sonic.new = false;
+
+    if (state.motion != MOTION_STATE_ON)
+    {
+        drive_duty(DEFAULT_FREQ, 0.0f);
+        return;
     }
 
-    // Get the current and last samples
-    struct sample_t current_sample = sample_series_get(distance_raw, 0);
-    struct sample_t last_sample = sample_series_get(distance_raw, 1);
+    /* aktuelle Distanz in cm */
+    float current_distance = (float)value.sonic.distance;
 
-    // Calculate the change in distance and time
-    float delta_distance = (current_sample.value - last_sample.value) / 1000.0; // convert mm to meters
-    float delta_time = (current_sample.usec - last_sample.usec) / 1000.0; // convert usec to msec
+    /* Geschwindigkeit (Diskret, reicht für D-Anteil) */
+    current_speed = current_distance - last_distance_cm;
+    last_distance_cm = current_distance;
 
-    // Calculate the current speed
-    if (delta_time > 0) {
-        current_speed = delta_distance / delta_time;
+    /* Ziel: goal * 10 cm */
+    float target_distance = (float)(state.goal * 10);
+
+    /* PD-Regler */
+    float duty = PD_controller(target_distance, current_distance);
+
+    /* Richtung */
+    if (current_distance > target_distance)
+    {
+        /* vorwärts */
+        direction = true;
+        drive_duty(DEFAULT_FREQ, duty);
+        value.motion = duty * 100.0f;
     }
-
-    // Calculate duty using the PD controller
-    float duty_cycle = PD_controller(gap_target, current_sample.value / 1000.0); // convert mm to meters
-
-    if(gap_target > current_sample.value / 1000.0){
+    else
+    {
+        /* rückwärts (Notfall / Überfahren) */
         direction = false;
-    }else{
-        direction = true; 
+        drive_duty(BACKWARD_FREQ, STATIC_BACKWARDS_DUTY);
+        value.motion = -STATIC_BACKWARDS_DUTY * 100.0f;
     }
-
-    if(direction == false){
-        duty_cycle = STATIC_BACKWARDS_DUTYCYCLE;
-        frequency = 140;
-    }
-
-    drive_duty(frequency, duty_cycle);
-
 }
 
-// PD controller function
-float PD_controller(float target_distance, float current_distance) {
-    float error = target_distance - current_distance;
+/* ---------- PD-Regler ---------- */
+float PD_controller(float target_cm, float current_cm)
+{
+    float error = target_cm - current_cm;
 
-    // Ensure error is positive
-    if (error < 0) {
+    if (error < 0)
         error = -error;
-    }
 
-    // Proportional part
-    float proportional_term = PROPORTIONAL_GAIN * error;
+    float p = PROPORTIONAL_GAIN * error;
+    float d = DERIVATIVE_GAIN * current_speed;
 
-    // Derivative part
-    float derivative_term = DERIVATIVE_GAIN * current_speed;
+    float out = p - d;
 
-    // PD combined result
-    float pd_total = proportional_term - derivative_term;
+    /* Begrenzen */
+    if (out < 0.0f) out = 0.0f;
+    if (out > 0.6f) out = 0.6f;
 
-    // Add disturbances
-    float pd_with_disturbance = pd_total + DISTURBANCE_OFFSET;
-
-    return pd_with_disturbance;
+    return out;
 }
+
 
