@@ -13,14 +13,21 @@
  * CONTENTS: declaration for all functions of motion module
  */
 
-#ifndef _MOTION_H_
-#define _MOTION_H_
+#ifndef MOTION_H
+#define MOTION_H
 
 #include <stdint.h>
+#include <stdbool.h>
+
+typedef struct {
+    float output;        // -1.0 .. +1.0  (PWM signed)
+    int32_t error_cm;
+    bool active;
+} motion_control_t;
+
+extern motion_control_t motion_control;
 
 void motion_init(void);
 void motion_loop(void);
-
-float PD_controller(float target_cm, float current_cm);
 
 #endif
