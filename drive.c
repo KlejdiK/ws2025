@@ -28,81 +28,102 @@
  * CONTENTS: implementation for all functions for PWM motor drive
  */
 
-#include <sam3x8e.h>
 #include <drive.h>
+
+#include <constants.h>
 #include <state.h>
-#include <math.h>
+#include <sam.h>
+#include <motion.h>
 
-void drive_clock_init(void){
+/*
+#define TARGET_DIST_CM 30
+#define DEADZONE_CM    3
+#define MIN_DUTY       0.2f
+#define MAX_DUTY       0.6f
+#define ERROR_SCALE     50f
+*/
 
-    // Configure the timer for waveform mode
-    TC2->TC_CHANNEL[0].TC_CMR = TC0_CMR0_WAVE |       // Enable wave mode
-                                TC0_CMR0_TCCLKS_TIMER_CLOCK1 | // Use MCK/2 as the clock source
-                                TC0_CMR0_WAVSEL_UP_RC | // Count up with automatic trigger on RC compare
-                                TC0_CMR0_ACPA_CLEAR |     // Set TIOA on RA compare match
-                                TC0_CMR0_ACPC_SET;    // Clear TIOA on RC compare match
-
-    // Set the frequency and duty cycle
-    uint32_t rc = DUE_MCK2 / 1600 / 2; //  Hz frequency         //TODO: HIER IST FEHLER
-    uint32_t ra = (uint32_t) rc * duty_cycle; //  duty cycle
-
-    TC2->TC_CHANNEL[0].TC_RA = ra;
-    TC2->TC_CHANNEL[0].TC_RC = rc;
-
-    // Enable the counter and start the timer
-    TC2->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
-}
-
-// initialization steps for PWM motor drive
-void drive_init(void){
-
-    // Enable the peripheral clock for PIOC (TC6 => TC2 with Channel 0) 
-    PMC->PMC_PCER1 |= PMC_PCER1_PID33;              //https://code.fbi.h-da.de/eingebettete-systeme/arduino-due/cmsis/-/raw/main/docs/datasheet.pdf#page=633
-
-    drive_clock_init();
-
-    // Configure IN1 (PA0) and IN2 (PA1) as outputs
-    PIOC->PIO_PER = PIO_PC23 | PIO_PC24 | PIO_PC25; // Enables the PIO to control the corresponding pin
-    PIOC->PIO_OER = PIO_PC23 | PIO_PC24 | PIO_PC25; // Enables the output on the I/O line
-    PIOC->PIO_CODR = PIO_PC23 | PIO_PC24 | PIO_PC25;           // Clears the data to be driven on the I/O line
-
-    //PIOC->PIO_PDR = PIO_PC25;
-
-    // Configure PIOC25 for PWM output
-    PIOC->PIO_ABSR |= PIO_PC25; // Assigns the I/O line to the Peripheral B function 
-
-}
-
-// loop for regular tasks related to PWM motor drive
-void drive_loop(void)
+void drive_init()
 {
-    if (direction)
-    {
-        // FORWARD
-        PIOC->PIO_CODR = PIO_PC23;
-        PIOC->PIO_SODR = PIO_PC24;
-    }
-    else
-    {
-        // BACKWARD
-        PIOC->PIO_SODR = PIO_PC23;
-        PIOC->PIO_CODR = PIO_PC24;
-    }
-    
+
+    PMC_PCER1 = PMC_PCER1_PID34;
+
+    PIOC_PER = (1 << 23) | (1 << 24);
+    PIOC_OER = (1 << 23) | (1 << 24);
+
+    PIOC_CODR = (1 << 23) | (1 << 24);
+
+    PIOC_PDR = (1 << 25);
+    PIOC_ABSR |= (1 << 25);
+
+    TC2_CCR0 = TC0_CCR0_CLKDIS;
+
+    TC2_CMR0 =
+        TC0_CMR0_WAVE |
+        TC0_CMR0_WAVSEL_UP_RC |
+        TC0_CMR0_ACPA_SET |
+        TC0_CMR0_ACPC_CLEAR |
+        TC0_CMR0_TCCLKS_TIMER_CLOCK1;
+
+    TC2_RC0 = 1000;
+    TC2_RA0 = 0;
+
+    TC2_CCR0 = TC0_CCR0_CLKEN | TC0_CCR0_SWTRG;
+
 }
 
-void drive_duty(const uint32_t freq, const float duty) {
+void drive_loop()
+{
+    if (state.motion != MOTION_STATE_ON)
+    {
+        PIOC_PER = PIOC_PER_P25;
+        PIOC_CODR = (1 << 23) | (1 << 24) | (1 << 25); // soll beode Richtungspins LOW also Stoppen
+        TC2_RA0 = 0;
+        value.motion = 0.0f;
+        return;
+    }
 
-    if(duty == duty_cycle)
-    return;
+    PIOC_PDR = PIOC_PDR_P25;
 
-    uint32_t rc = SystemCoreClock / 2 / freq;
-    uint32_t ra = (uint32_t)(rc * duty);
 
-    TC2->TC_CHANNEL[0].TC_RA = ra;
-    TC2->TC_CHANNEL[0].TC_RC = rc;
+    switch (motion_control.direction)
+    {
+        case MOTION_DIR_FORWARD:
+            PIOC_CODR = (1 << 23);
+            PIOC_SODR = (1 << 24);
+            break;
 
-    TC2->TC_CHANNEL[0].TC_CCR = TC_CCR_CLKEN | TC_CCR_SWTRG;
+        case MOTION_DIR_BACKWARD:
+            PIOC_SODR = (1 << 23);
+            PIOC_CODR = (1 << 24);
+            break;
+            
+        case MOTION_DIR_STOP:
+        default:
+            PIOC_CODR = (1 << 23) | (1 << 24);
+            TC2_RA0 = 0;
+            return;
+    }
 
-    duty_cycle = duty;
+    uint32_t ra_value = (uint32_t)(TC2_RC0 * motion_control.duty);
+
+    // Schutz gegen Überlauf
+    if (ra_value >= TC2_RC0) ra_value = TC2_RC0 - 1;
+
+    // Wenn Duty 0 sein soll, RA auf 0 setzen ODER Pin auf GPIO schalten
+    if (motion_control.duty <= 0.01f) {
+        PIOC_PER = (1 << 25);
+        PIOC_CODR = (1 << 25);
+    } else {
+        TC2_RA0 = ra_value;
+    }
+
+    value.motion = motion_control.duty * 100.0f;
+
+    /*
+    if (ra_value > TC2_RC0)
+        ra_value = TC2_RC0;
+
+    TC2_RA0 = ra_value;
+    */   
 }
