@@ -19,10 +19,8 @@
 #include <stdbool.h>
 
 #define MOTION_DEADZONE_CM  3
-#define MOTION_MIN_DUTY     0.20f
-#define MOTION_MAX_DUTY     1.0f
-#define MOTION_KP           0.015f
-#define BRAKE_ZONE_CM       10
+#define MOTION_MAX_DUTY     0.8f    // Maximal 80% für Sicherheit
+#define MOTION_KP           0.02f   // Etwas höher für bessere Reaktion
 
 typedef enum{
     MOTION_DIR_STOP,
